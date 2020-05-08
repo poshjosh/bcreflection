@@ -30,7 +30,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import com.bc.reflection.function.Predicate;
+import java.util.function.Predicate;
 
 /**
  * @author Chinomso Bassey Ikwuagwu on Apr 25, 2017 8:51:02 PM

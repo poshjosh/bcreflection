@@ -21,11 +21,12 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Type;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Predicate;
 
 /**
  * @author Chinomso Bassey Ikwuagwu on Apr 30, 2017 10:46:42 AM
  */
-public class MethodHasParameterType extends AbstractPredicate<Method> {
+public class MethodHasParameterType implements Predicate<Method> {
 
     private final Class parameterType;
     

@@ -7,9 +7,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.List;
+import java.util.function.Function;
 
-public class FindClassesInPackage{
+public class FindClassesInPackage implements Function<String, List<Class>>{
     
+    @Override
     public List<Class> apply(String packageName) {
         try{
             return Arrays.asList(this.getClasses(packageName));

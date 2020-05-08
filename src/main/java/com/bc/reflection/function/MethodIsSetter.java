@@ -17,11 +17,12 @@
 package com.bc.reflection.function;
 
 import java.lang.reflect.Method;
+import java.util.function.Predicate;
 
 /**
  * @author Chinomso Bassey Ikwuagwu on Apr 30, 2017 10:44:49 AM
  */
-public class MethodIsSetter extends AbstractPredicate<Method> {
+public class MethodIsSetter implements Predicate<Method> {
 
     public MethodIsSetter() { }
 

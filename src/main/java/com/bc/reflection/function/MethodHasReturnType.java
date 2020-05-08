@@ -17,6 +17,7 @@
 package com.bc.reflection.function;
 
 import java.lang.reflect.Method;
+import java.util.function.Predicate;
 
 /**
  * @author Chinomso Bassey Ikwuagwu on Oct 10, 2018 3:09:54 PM
