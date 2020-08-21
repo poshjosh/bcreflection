@@ -2,100 +2,160 @@ package com.bc.reflection.function;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.JarURLConnection;
 import java.net.URL;
+import java.net.URLConnection;
+import java.net.URLDecoder;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.function.Function;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
-public class FindClassesInPackage implements Function<String, List<Class>>{
+/**
+ * @author hp
+ * @see https://stackoverflow.com/questions/520328/can-you-find-all-classes-in-a-package-using-reflection
+ */
+public class FindClassesInPackage implements Function<String, List<Class<?>>>{
+
+    private static final Logger LOG = Logger.getLogger(FindClassesInPackage.class.getName());
     
     @Override
-    public List<Class> apply(String packageName) {
+    public List<Class<?>> apply(String packageName) {
         try{
-            return Arrays.asList(this.getClasses(packageName));
+            return Collections.unmodifiableList(this.getClasses(packageName));
         }catch(IOException | ClassNotFoundException e) {
-            throw new RuntimeException(e);
+            LOG.log(Level.WARNING, "Failed to find classes in package: " + packageName, e);
+            return Collections.EMPTY_LIST;
         }
     }
 
     /**
-     * Gets all classes within a given package. 
-     * <p><b>Note</b> that it should only work for classes found locally, 
-     * getting really ALL classes is impossible.
-     * </p>
-     * Scans all classes accessible from the context class loader which belong 
-     * to the given package and sub-packages.
-     *
-     * @param packageName The base package
-     * @return The classes
-     * @throws ClassNotFoundException
+     * Attempts to list all the classes in the specified package as determined
+     * by the context class loader
+     * 
+     * @param packageName
+     *            the package name to search
+     * @return a list of classes that exist within that package
+     * @throws ClassNotFoundException if something went wrong
      * @throws IOException
      */
-    public Class[] getClasses(String packageName)
+    public List<Class<?>> getClasses(String packageName) 
             throws ClassNotFoundException, IOException {
+        
+        final ArrayList<Class<?>> classes = new ArrayList<>();
 
-        final ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+        final ClassLoader cld = Thread.currentThread()
+                .getContextClassLoader();
 
-        assert classLoader != null;
-
-        final String path = packageName.replace('.', '/');
-
-        final Enumeration<URL> resources = classLoader.getResources(path);
-
-        final List<File> dirs = new ArrayList<>();
-
-        while (resources.hasMoreElements()) {
-
-            final URL resource = resources.nextElement();
-
-            dirs.add(new File(resource.getFile()));
+        if (cld == null) {
+            throw new ClassNotFoundException("Can't get class loader.");
         }
 
-        final List<Class> classes = new ArrayList<>();
+        final Enumeration<URL> resources = cld.getResources(packageName.replace('.', '/'));
 
-        for (File directory : dirs) {
+        URLConnection connection;
 
-            classes.addAll(findClasses(directory, packageName));
+        for (URL url = null; resources.hasMoreElements()
+                && ((url = resources.nextElement()) != null);) {
+
+                connection = url.openConnection();
+
+            if (connection instanceof JarURLConnection) {
+
+                checkJarFile((JarURLConnection) connection, packageName, classes);
+
+            } else if (connection.getClass().getCanonicalName().equals("sun.net.www.protocol.file.FileURLConnection")) {
+
+                checkDirectory(new File(URLDecoder.decode(url.getPath(), "UTF-8")), packageName, classes);
+            } else {
+                throw new IOException(packageName + " ("
+                        + url.getPath()
+                        + ") does not appear to be a valid package");
+            }    
         }
 
-        return classes.toArray(new Class[classes.size()]);
+        List<Class<?>> result = classes.isEmpty() ? Collections.EMPTY_LIST : Collections.unmodifiableList(classes);
+        
+        if(LOG.isLoggable(Level.INFO)) {
+            LOG.log(Level.INFO, "In package: {0}, found classes: {1}", new Object[]{packageName, result});
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Private helper method
+     * 
+     * @param directory
+     *            The directory to start with
+     * @param pckgname
+     *            The package name to search for. Will be needed for getting the
+     *            Class object.
+     * @param classes
+     *            if a file isn't loaded but still is in the directory
+     * @throws ClassNotFoundException
+     */
+    private void checkDirectory(File directory, String pckgname, List<Class<?>> classes) throws ClassNotFoundException {
+        File tmpDirectory;
+
+        if (directory.exists() && directory.isDirectory()) {
+            
+            final String[] files = directory.list();
+
+            for (final String file : files) {
+                if (file.endsWith(".class")) {
+                    try {
+                        classes.add(Class.forName(pckgname + '.'
+                                + file.substring(0, file.length() - 6)));
+                    } catch (final NoClassDefFoundError e) {
+                        // do nothing. this class hasn't been found by the
+                        // loader, and we don't care.
+                    }
+                } else if ((tmpDirectory = new File(directory, file))
+                        .isDirectory()) {
+                    checkDirectory(tmpDirectory, pckgname + "." + file, classes);
+                }
+            }
+        }
     }
 
     /**
-     * Recursive method used to find all classes in a given directory and sub directories.
-     *
-     * @param directory   The base directory
-     * @param packageName The package name for classes found inside the base directory
-     * @return The classes
+     * Private helper method.
+     * 
+     * @param connection
+     *            the connection to the jar
+     * @param pckgname
+     *            the package name to search for
+     * @param classes
+     *            the current ArrayList of all classes. This method will simply
+     *            add new classes.
      * @throws ClassNotFoundException
+     *             if a file isn't loaded but still is in the jar file
+     * @throws IOException
+     *             if it can't correctly read from the jar file.
      */
+    private void checkJarFile(JarURLConnection connection, String pckgname, List<Class<?>> classes)
+            throws ClassNotFoundException, IOException {
+        final JarFile jarFile = connection.getJarFile();
+        final Enumeration<JarEntry> entries = jarFile.entries();
+        String name;
 
-    private List<Class> findClasses(File directory, String packageName) throws ClassNotFoundException {
+        for (JarEntry jarEntry = null; entries.hasMoreElements()
+                && ((jarEntry = entries.nextElement()) != null);) {
+            name = jarEntry.getName();
 
-        final List<Class> classes = new ArrayList<>();
+            if (name.contains(".class")) {
+                name = name.substring(0, name.length() - 6).replace('/', '.');
 
-        if (!directory.exists()) {
-            return classes;
-        }
-
-        final File[] files = directory.listFiles();
-
-        for (File file : files) {
-
-            if (file.isDirectory()) {
-
-                assert !file.getName().contains(".");
-
-                classes.addAll(findClasses(file, packageName + "." + file.getName()));
-
-            } else if (file.getName().endsWith(".class")) {
-
-                classes.add(Class.forName(packageName + '.' + file.getName().substring(0, file.getName().length() - 6)));
+                if (name.contains(pckgname)) {
+                    classes.add(Class.forName(name));
+                }
             }
         }
-
-        return classes;
     }
 }
